@@ -228,7 +228,7 @@ def main():
     parser.add_argument("--range", help="Only smooth layers within this range.")
     parser.add_argument("--interpolate-distance", help="Interpolate inbetween points on a layer. This value is the desired distance between each interpolated point in mm.", type=float, default=-1)
     parser.add_argument("--smoothness-ratio", help="Smooth layer lines over a proportion of their length. If smoothness_ratio is 1, smooth over the entire length, 0.5, half the length, etc...", type=float, default=1.0)
-    parser.add_argument("--output-file-path", help="The path to save the processed output to. If not given, the original file is overwrtiten.")
+    parser.add_argument("--output-file-path", help="The path to save the processed output to. If not given, the original file is overwritten.")
     args = parser.parse_args()
     vase_gcode_path = Path(args.vase_gcode)
     smooth_layer_range = None

@@ -29,7 +29,7 @@ quite right you can tweak these parameters.
 | --range | Only smooth layers within this range. |
 | --interpolate-distance | Interpolate inbetween points on a layer. This value is the desired distance between each interpolated point in mm. |
 | --smoothness-ratio | Smooth layer lines over a proportion of their length. If smoothness_ratio is 1, smooth over the entire length, 0.5, half the length, etc... |
-| --output-file-path | The path to save the processed output to. If not given, the original file is overwrtiten. |
+| --output-file-path | The path to save the processed output to. If not given, the original file is overwritten. |
 
 This tool seems to work pretty well. When I tested it with a few different
 models it produced g-code that looked like what I wanted. I printed a basic cone
