@@ -17,12 +17,7 @@ def save_gcode(gcode, file_path):
     file_path.write_text(gcode)
 
 def get_toolchange_count(gcode, idx):
-    tchange_count_start = idx + len(TOOLCHANGE_START)
-    tchange_count_end = gcode.find("\n", tchange_count_start)
-    if tchange_count_end == -1:
-        return None
-    toolchange_line = gcode[tchange_count_start:tchange_count_end]
-    return int(toolchange_line.split("#")[-1])
+    return gcode.count(TOOLCHANGE_START, 0, idx+len(TOOLCHANGE_START)) 
 
 def get_total_toolchange_count(gcode):
     total_toolchange_start = gcode.rfind(TOTAL_TOOLCHANGES) # Doing rfind since we know its near the end so should be faster
@@ -90,6 +85,7 @@ def get_config_lines():
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("file_path", help="The path to the gcode file to process.")
+    parser.add_argument("--output-file-path", help="The path to save the processed output to. If not given, the original file is overwritten.")
     args = parser.parse_args()
     gcode_path = Path(args.file_path)
     print("Loading G-code...")
@@ -102,7 +98,8 @@ def main():
     print("Removing last ram and tower wipe...")
     gcode = remove_chars_from_gcode(gcode, ram_range[0], ram_range[1])
     print("Successfully removed last ram and tower wipe!")
-    save_gcode(gcode, gcode_path)
+    output_file_path = Path(args.output_file_path) if args.output_file_path is not None else gcode_path
+    save_gcode(gcode, output_file_path)
     print("G-code Saved!")
 
 
