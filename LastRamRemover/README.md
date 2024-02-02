@@ -1,14 +1,15 @@
 ## LastRamRemover
 
 Ever have a print where you are using the single extruder multiple material mode
-BUT you are doing the color changes manually? When doing this and using a wipe
-tower, at the end of the print PrusaSlicer will have the nozzle go back over the
-wipe tower and extrude filament like it does for a normal color change. But this
-doesn't make sense because it will do this even when the wipe tower is not as
-tall as the current Z height. It also doesn't make sense because this ram that
-it is performing isn't necessary because you are doing manual filament changes.
+***BUT*** you are doing the color changes manually? When doing this and using a
+wipe tower, at the end of the print PrusaSlicer will have the nozzle go back
+over the wipe tower and extrude filament like it does for a normal color change.
+But this doesn't make sense because it will do this even when the wipe tower is
+not as tall as the current Z height. It also doesn't make sense because this ram
+that it is performing isn't necessary because you are doing manual filament
+changes.
 
-This post-processing script take care of that last ram and removes it from the
+This post-processing script takes care of that last ram and removes it from the
 g-code.
 
 | Before | After |
