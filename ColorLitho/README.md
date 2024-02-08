@@ -15,10 +15,11 @@ was already moving as it was extruding. After this wipe, it will perform a
 z-hop, move to the next location, z-hop down and continue.
 
 The idea with this was to see if it was possible to avoid the little zits that
-z-hopping can create, while also realizing the benefits of z-hopping. The
-benefits being the nozzle is less likely to scrape the current layer, which will
-happen with the color lithophane, given it will be moving over the same area for
-the multiple colors.
+z-hopping can create, while also realizing the benefits of z-hopping. The main
+benefit in this case is avoiding scraping the current layer with the nozzle.
+This is more likely to happen with a color lithophane since the nozzle has to
+repeatedly move over the same areas when it extrudes the next filament of a
+different color.
 
 Here's a picture to try to better show what is happening:
 
@@ -49,7 +50,7 @@ the nozzle moved over an open spot on the layer, the potential zit would not
 occur. I think this might have had to do with breaking the suction in the
 nozzle. Since CustomWipe lets retractions happen like normal, when the nozzle
 moves over the open section, air can get in and break the suction, letting the
-filament that was printed stay flat on the print. When the nozzle did the
+filament that was printed, stay flat on the print. When the nozzle did the
 custom wipe over a part of the layer that was already printed, it still left a
 tiny zit.
 
@@ -66,18 +67,17 @@ resulting in less zits overall.
 There are two things to note about this. First, similar to CustomWipe, I think
 this might have helped, but I'm not 100% sure. There were still zits, but due to
 the aforementioned time constraints, I wasn't able to print two versions, one
-with ColorReorder and one without. The next problem with this one is you can't
-use it without a custom build of PrusaSlicer. When printing something
-multicolored, PrusaSlicer will order the colors for each layer to start with
-whichever filament ended the last layer. This saves a color change for each
-layer, which generally is desirable. However in this case, we don't want that. I
-need each layer to have all four filaments printing so I can order them
-according to the amount they print. It also isn't as easy as just adding in a
-manual color change because then you can't use the wipe tower, which I wanted to
-use. So I found the code in PrusaSlicer that reorders the extruders and removed
-it. Then it happily printed all four colors for each layer. It was a simple
-enough change but I'm not sure if there was enough bang for the buck here. If
-interested,
+with ColorReorder and one without. The next problem with this is you can't use
+it without a custom build of PrusaSlicer. When printing something multicolored,
+PrusaSlicer will order the colors for each layer to start with whichever
+filament ended the last layer. This saves a color change for each layer, which
+generally is desirable. However in this case, we don't want that. I need each
+layer to have all four filaments printing so I can order them according to the
+amount they print. It also isn't as easy as just adding in a manual color change
+because then you can't use the wipe tower, which I wanted to use. So I found the
+code in PrusaSlicer that reorders the extruders and removed it. Then it happily
+printed all four colors for each layer. It was a simple enough change but I'm
+not sure if there was enough bang for the buck here. If interested,
 [these](https://github.com/prusa3d/PrusaSlicer/blob/97c3679a37e9ede812432e25a096e4906110d441/src/libslic3r/GCode/ToolOrdering.cpp#L357-L363)
 are the lines you need to remove or at least comment out to get this to work.
 
