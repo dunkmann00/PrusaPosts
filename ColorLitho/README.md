@@ -35,7 +35,7 @@ layer that I felt was "smoother" than a layer printed with z-hop, but there was
 also no nozzle scraping like there would be if z-hop was off. It also might not
 matter very much to the end result, since the top layers of the color
 lithophanes are the actual lithophane part, made of only white filament. I never
-fully printed one with each different approach to compared the final print. I
+fully printed one with each different approach to compare the final print. I
 usually stopped the print after the color section was finished. This was done
 due to time constraints when I was trying to get this project finished. But it
 could be useful to make a complete color lithophane and compare the 3 different
@@ -93,12 +93,12 @@ do.
 
 ColorBlip was the last script I made for printing my color lithophanes. I
 noticed in the g-code preview there were a bunch of little, almost micro, lines
-that it was trying to print for the lithophane section. Especially as it got
-higher up there were a bunch on a lot of the top layers. These little lines were
-definitely too short for the printer to print successfully. They weren't even
-the length of the nozzle. I figured that they would probably not improve the
-look of the lithophane and would also cause the printer to have to make a bunch
-of extra moves.
+that it was trying to print for the lithophane section. This was especially
+prevalent on the topmost layers. These little lines were definitely too short
+for the printer to print successfully. They weren't even the length of the
+nozzle. I figured that they would probably not improve the look of the
+lithophane and would also cause the printer to have to make a bunch of extra
+moves.
 
 So what does it actually do you ask? ColorBlip removes any lines that are
 shorter than the nozzle diameter. This way the print doesn't end up with any
