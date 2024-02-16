@@ -123,9 +123,13 @@ the resulting prints looked great. I can't imagine these little "blips" would
 have added to the finished print. I can only think that at best they would add
 nothing, and at worst make the print look a little worse.
 
-Unfortunately, currently this script is not rock solid. It worked great for the
-first two prints I used it on, but the third print uncovered a bug with how it
-processes lines removed at the end of a layer. I want to re-do this script to
-make it more reliable as I think it is definitely useful. So you can give it a
-go but be aware, it may not work perfectly right. Check the g-code preview to be
-sure there are no lines missing that should not be missing.
+The current version of the script is my second attempt at implementing this
+functionality. This one is much better than the first and succeeds where the
+original failed. However, it still does not support all print settings like
+wipes, z-hops, and multiple extruder or single extruder multiple material
+changes. I wouldn't mind trying to support these, but I did not need them for
+how I configured my lithophane prints. It is surprisingly tricky to make sure
+these are all handled correctly. Given my experiences with this post processing
+script I would definitely recommend giving it a try, if you are not using any of
+those unsupported features. I would highly recommend checking the g-code preview
+to make sure the output looks reasonable before sending it to your printer.
