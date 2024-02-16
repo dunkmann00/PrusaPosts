@@ -40,6 +40,8 @@ TYPE_ID = ";TYPE:"
 Z_HOP_ID = "; retract_lift "
 FILAMENT_Z_HOP_ID = "; filament_retract_lift "
 
+PRUSA_CONFIG_ID = "; prusaslicer_config = "
+
 g1_line = re.compile("^G1 (?:(?:X([0-9]*\.?[0-9]*) *)|(?:Y([0-9]*\.?[0-9]*) *)|(?:Z([0-9]*\.?[0-9]*) *)|(?:E(-?[0-9]*\.?[0-9]*) *)|(?:F([0-9]+) *))+$")
 G1 = namedtuple("G1", ["x", "y", "z", "e", "f"])
 
@@ -86,7 +88,7 @@ class GCodeConfig:
         self.travel_speed = int(get_value_for_id(TRAVEL_SPEED_ID, gcode_lines)) * 60     # convert to speed/min
         self.travel_speed_z = int(get_value_for_id(TRAVEL_SPEED_Z_ID, gcode_lines)) * 60 # convert to speed/min
         self.nozzle_diameter = float(get_value_for_id(NOZZLE_DIAMETER_ID, gcode_lines).split(",")[0])
-        # if wipe_threshold is None:
+
         self.wipe_threshold = float(get_value_for_id((FILAMENT_RETRACT_BEFORE_TRAVEL_ID, RETRACT_BEFORE_TRAVEL_ID), gcode_lines).split(",")[0])
 
         self.retract_len = float(get_value_for_id((FILAMENT_RETRACT_LENGTH_ID, RETRACT_LENGTH_ID), gcode_lines).split(",")[0])
@@ -338,10 +340,13 @@ def store_gcode_lines(gcode_lines, gcode_path):
 def get_value_for_id(id, gcode_lines):
     if isinstance(id, str):
         id = [id]
-    for line in reversed(gcode_lines): # Go reversed because these things are found at the end
-        for gcode_id in id:
+    for gcode_id in id:
+        for line in reversed(gcode_lines): # Go reversed because these things are found at the end
             if line.startswith(gcode_id):
                 return line.split("=")[-1].strip()
+            elif line.startswith(PRUSA_CONFIG_ID):
+                if line.split("=")[-1].strip() == "begin":
+                    break
 
 def gcode_fmt(value, precision=3):
     return f"{value:.{precision}f}".strip("0") if value != 0 else "0.000"
