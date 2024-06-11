@@ -275,27 +275,49 @@ class Line:
             return gcode_lines
 
         lines = []
-        current_extrusion_remaining = self.config.travel_multiplier_distance
+        # current_extrusion_remaining = self.config.travel_multiplier_distance
+        # add_start_margin = False
         current_point = self.start_point
+        first_extrusion = False
         for i, line in enumerate(gcode_lines):
-            if current_extrusion_remaining > 0:
+            # if current_extrusion_remaining > 0:
+            #     g1 = parse_line(line)
+            #     if g1 is not None:
+            #         new_point = current_point.updated_with_g1_move(g1)
+            #         if g1.e is not None and g1.e > 0 and not current_point.is_xy_equal(new_point):
+            #             extrusion_distance = current_point.xy_dist(new_point)
+            #             if current_extrusion_remaining >= extrusion_distance:
+            #                 lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(g1.e * self.config.travel_extrusion_multiplier, precision=5)} ; TEM Updated ({self.config.travel_extrusion_multiplier}x)")
+            #             else:
+            #                 waypoint = current_point.waypoint(new_point, current_extrusion_remaining)
+            #                 waypoint_proportion = current_extrusion_remaining / extrusion_distance
+            #                 lines.append(f"G1 X{gcode_fmt(waypoint.x)} Y{gcode_fmt(waypoint.y)} E{gcode_fmt(g1.e * waypoint_proportion * self.config.travel_extrusion_multiplier, precision=5)} ; TEM Updated ({self.config.travel_extrusion_multiplier}x)")
+            #                 lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(g1.e * (1.0 - waypoint_proportion), precision=5)} ; TEM Updated")
+            #             current_extrusion_remaining -= extrusion_distance
+            #             current_point = new_point
+            #             continue
+            #         else:
+            #             current_point = new_point
+            if not first_extrusion:
                 g1 = parse_line(line)
                 if g1 is not None:
                     new_point = current_point.updated_with_g1_move(g1)
                     if g1.e is not None and g1.e > 0 and not current_point.is_xy_equal(new_point):
-                        extrusion_distance = current_point.xy_dist(new_point)
-                        if current_extrusion_remaining >= extrusion_distance:
-                            lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(g1.e * self.config.travel_extrusion_multiplier, precision=5)} ; TEM Updated ({self.config.travel_extrusion_multiplier}x)")
-                        else:
-                            waypoint = current_point.waypoint(new_point, current_extrusion_remaining)
-                            waypoint_proportion = current_extrusion_remaining / extrusion_distance
-                            lines.append(f"G1 X{gcode_fmt(waypoint.x)} Y{gcode_fmt(waypoint.y)} E{gcode_fmt(g1.e * waypoint_proportion * self.config.travel_extrusion_multiplier, precision=5)} ; TEM Updated ({self.config.travel_extrusion_multiplier}x)")
-                            lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(g1.e * (1.0 - waypoint_proportion), precision=5)} ; TEM Updated")
-                        current_extrusion_remaining -= extrusion_distance
-                        current_point = new_point
+                        wipe_point = current_point.wipe_point(new_point, self.config.travel_multiplier_distance)
+                        distance = current_point.xy_dist(new_point)
+                        e_rate = g1.e / distance
+                        start_g1 = parse_line(gcode_lines[0])
+                        start_line = f"G1 X{gcode_fmt(wipe_point.x)} Y{gcode_fmt(wipe_point.y)}"
+                        if start_g1.z is not None:
+                            start_line += f" Z{gcode_fmt(start_g1.z)}"
+                        if start_g1.f is not None:
+                            start_line += f" F{int(start_g1.f)}"
+                        start_line += " ; TEM Updated"
+                        lines[0] = start_line
+                        lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(e_rate * (distance + self.config.travel_multiplier_distance), precision=5)} ; TEM Updated")
+                        first_extrusion = True
                         continue
-                    else:
-                        current_point = new_point
+                    current_point = new_point
             lines.append(line)
         return lines
 
@@ -404,7 +426,7 @@ def main():
     parser = argparse.ArgumentParser(description="Apply an extrusion multiplier for a small amount of the extrusion after a travel move occurs.")
     parser.add_argument("file_path", help="The path to the gcode file to process.")
     # parser.add_argument("--wipe-threshold", help="When the upcoming travel distance is greater than this, the wipe and hop is added. The default is the 'Minimum travel after retraction' slicer setting.", type=float)
-    parser.add_argument("-m", "--travel-extrusion-multiplier", help="The extrusion multiplier to apply to the initial extrusion after a travel move.", type=float, default=1.1)
+    parser.add_argument("-m", "--travel-extrusion-multiplier", help="The extrusion multiplier to apply to the initial extrusion after a travel move.", type=float, default=1.0)
     parser.add_argument("-d", "--travel-multiplier-distance", help="The distance to apply the extrusion multiplier after a travel move.", type=float, default=1.0)
     parser.add_argument("--output-file-path", help="The path to save the processed output to. If not given, the original file is overwrtiten.")
     args = parser.parse_args()
