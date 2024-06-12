@@ -13,8 +13,8 @@ import argparse, re
 #                                          |
 #                                          |--> Lines
 
-HOLE_CLOSER_ENABLED = "; HOLE_CLOSER_ENABLED"
-HOLE_CLOSER_DISABLED = "; HOLE_CLOSER_DISABLED"
+GAP_CLOSER_ENABLED = "; GAP_CLOSER_ENABLED"
+GAP_CLOSER_DISABLED = "; GAP_CLOSER_DISABLED"
 COLOR_CHANGE_ID = "M600"
 LAYER_CHANGE_ID = ";LAYER_CHANGE"
 AFTER_LAYER_CHANGE_ID = ";AFTER_LAYER_CHANGE"
@@ -144,14 +144,14 @@ class GCode:
 
     def process_gcode_lines(self, gcode_lines):
         current_point = Point.undefined()
-        hole_closer_enabled = True
+        gap_closer_enabled = True
 
         pre_end_idx = 0
         for i, line in enumerate(gcode_lines):
-            if line == HOLE_CLOSER_ENABLED:
-                hole_closer_enabled = True
-            elif line == HOLE_CLOSER_DISABLED:
-                hole_closer_enabled = False
+            if line == GAP_CLOSER_ENABLED:
+                gap_closer_enabled = True
+            elif line == GAP_CLOSER_DISABLED:
+                gap_closer_enabled = False
             elif line == LAYER_CHANGE_ID:
                 pre_end_idx = i
                 break
@@ -170,18 +170,18 @@ class GCode:
         layers = []
         layer_start_idx = None
         for i, line in enumerate(gcode_lines[pre_end_idx:post_start_idx], start=pre_end_idx):
-            if line == HOLE_CLOSER_ENABLED:
-                hole_closer_enabled = True
-            elif line == HOLE_CLOSER_DISABLED:
-                hole_closer_enabled = False
+            if line == GAP_CLOSER_ENABLED:
+                gap_closer_enabled = True
+            elif line == GAP_CLOSER_DISABLED:
+                gap_closer_enabled = False
             elif line == LAYER_CHANGE_ID:
                 if layer_start_idx is not None:
-                    layer = Layer(gcode_lines[layer_start_idx:i], self.config, current_point, hole_closer_enabled)
+                    layer = Layer(gcode_lines[layer_start_idx:i], self.config, current_point, gap_closer_enabled)
                     current_point = layer.end_point
                     layers.append(layer)
                 layer_start_idx = i
         # Handle the last layer
-        layer = Layer(gcode_lines[layer_start_idx:post_start_idx], self.config, current_point, hole_closer_enabled)
+        layer = Layer(gcode_lines[layer_start_idx:post_start_idx], self.config, current_point, gap_closer_enabled)
         current_point = layer.end_point
         layers.append(layer)
 
@@ -317,9 +317,9 @@ class Line:
                                 start_line += f" Z{gcode_fmt(start_g1.z)}"
                             if start_g1.f is not None:
                                 start_line += f" F{int(start_g1.f)}"
-                            start_line += " ; HC Updated"
+                            start_line += " ; GapCloser"
                             lines[0] = start_line
-                            lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(e_rate * (distance + self.config.back_up_distance), precision=5)} ; HC Updated")
+                            lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(e_rate * (distance + self.config.back_up_distance), precision=5)} ; GapCloser")
                         is_first_extrude = False
                         continue
                     current_point = new_point
@@ -358,11 +358,11 @@ class Line:
                             distance = current_point.xy_dist(new_point)
                             new_e = g1.e or initial_e_rate * distance
                             if extrusion_remaining > distance:
-                                lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e, precision=5)} ; HC Updated (Seam)")
+                                lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e, precision=5)} ; GapCloser (Seam)")
                             else:
                                 waypoint = current_point.waypoint(new_point, extrusion_remaining)
                                 waypoint_proportion = extrusion_remaining / distance
-                                lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e * waypoint_proportion, precision=5)} ; HC Updated (Seam)")
+                                lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e * waypoint_proportion, precision=5)} ; GapCloser (Seam)")
 
                                 start_g1 = parse_line(gcode_lines[0])
                                 start_line = f"G1 X{gcode_fmt(waypoint.x)} Y{gcode_fmt(waypoint.y)}"
@@ -370,7 +370,7 @@ class Line:
                                     start_line += f" Z{gcode_fmt(start_g1.z)}"
                                 if start_g1.f is not None:
                                     start_line += f" F{int(start_g1.f)}"
-                                start_line += " ; HC Updated (Seam)"
+                                start_line += " ; GapCloser (Seam)"
                                 lines.append(start_line)
                             extrusion_remaining -= distance
                             prev_e = new_e
@@ -449,7 +449,7 @@ def gcode_fmt(value, precision=3):
 
 def get_config_lines(config):
     config_gcode_lines = []
-    config_gcode_lines.append("; Post-Processed With HoleCloser (aka HC)")
+    config_gcode_lines.append("; Post-Processed With GapCloser")
     for name, value in sorted(vars(config).items()):
         if isinstance(value, bool):
             value = int(value)
@@ -472,7 +472,7 @@ def get_config_lines(config):
 #     return gcode.gcode_lines()
 
 def main():
-    parser = argparse.ArgumentParser(description="Close up small holes that can be found at the start of extrusions after travel moves.")
+    parser = argparse.ArgumentParser(name="GapCloser", description="Close up small gaps/holes that can be found at the start of extrusions after travel moves.")
     parser.add_argument("file_path", help="The path to the gcode file to process.")
     parser.add_argument("-d", "--back-up-distance", help="The distance to back up the extrusion by after a travel move.", type=float, default=1.0)
     parser.add_argument("--output-file-path", help="The path to save the processed output to. If not given, the original file is overwrtiten.")
@@ -482,7 +482,7 @@ def main():
     gcode_lines = get_gcode_lines(gcode_path)
     # print(f"{get_retraction_count(gcode_lines)} retractions performed before.")
     # print("Removing short lines...")
-    print("Fixing extrusions found after travels...")
+    print("Fixing gaps from extrusions found after travels...")
     config_args = vars(args).copy()
     config_args.pop("file_path")
     config_args.pop("output_file_path", None)
