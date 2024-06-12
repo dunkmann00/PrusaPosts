@@ -483,9 +483,9 @@ def get_config_lines(config):
 #     return gcode.gcode_lines()
 
 def main():
-    parser = argparse.ArgumentParser(prog="GapCloser", description="Close up small gaps/holes that can be found at the start of extrusions after travel moves.")
+    parser = argparse.ArgumentParser(prog="GapCloser", description="Close up small gaps/holes that can be found at the start of extrusions after travel moves with deretractions.")
     parser.add_argument("file_path", help="The path to the gcode file to process.")
-    parser.add_argument("-d", "--back-up-distance", help="The distance to back up the extrusion by after a travel move.", type=float, default=1.0)
+    parser.add_argument("-d", "--back-up-distance", help="The distance to back up the extrusion by after a travel move with a deretraction.", type=float, default=1.0)
     parser.add_argument("--output-file-path", help="The path to save the processed output to. If not given, the original file is overwrtiten.")
     args = parser.parse_args()
     gcode_path = Path(args.file_path)
@@ -493,7 +493,7 @@ def main():
     gcode_lines = get_gcode_lines(gcode_path)
     # print(f"{get_retraction_count(gcode_lines)} retractions performed before.")
     # print("Removing short lines...")
-    print("Fixing gaps from extrusions found after travels...")
+    print("Fixing gaps...")
     config_args = vars(args).copy()
     config_args.pop("file_path")
     config_args.pop("output_file_path", None)
