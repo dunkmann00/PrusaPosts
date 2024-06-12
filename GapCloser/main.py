@@ -79,12 +79,12 @@ class Point(namedtuple("Point", ["x", "y", "z"])):
         dx = (point.x - self.x) * p
         dy = (point.y - self.y) * p
         return self._replace(x=self.x+dx, y=self.y+dy)
-    def wipe_point(self, prev_point, distance):
-        point_dist = prev_point.xy_dist(self)
-        p = 1.0 + (distance / point_dist)
-        dx = (self.x - prev_point.x) * p
-        dy = (self.y - prev_point.y) * p
-        return prev_point._replace(x=prev_point.x+dx, y=prev_point.y+dy, z=self.z)
+    def back_up_point(self, next_point, distance):
+        point_dist = next_point.xy_dist(self)
+        p = distance / point_dist
+        dx = (next_point.x - self.x) * p
+        dy = (next_point.y - self.y) * p
+        return next_point._replace(x=self.x-dx, y=self.y-dy, z=self.z)
     def is_xy_equal(self, point):
         return self.x == point.x and self.y == point.y
 
@@ -237,6 +237,8 @@ class Layer:
         line_start_point = start_point
         # current_type = None
         extrusion_end_point = start_point
+        wipe_start_idx = None
+        wipe_end_idx = None
         for i, line in enumerate(gcode_lines[pre_end_idx:], start=pre_end_idx):
             g1 = parse_line(line)
             if g1 is not None:
@@ -244,19 +246,27 @@ class Layer:
                 if g1.e is not None and g1.e > 0:
                     extrusion_end_point = new_point # Tells us where extruding ends (needed when there is also a wipe)
                 if g1.e is None and not current_point.is_xy_equal(new_point): # Travel move found
-                    line = Line(gcode_lines[line_start_idx:i], self.config, line_start_point, current_point, extrusion_end_point, enabled)
+                    wipe_indices = (wipe_start_idx, wipe_end_idx) if wipe_start_idx is not None else None
+                    line = Line(gcode_lines[line_start_idx:i], self.config, line_start_point, current_point, extrusion_end_point, wipe_indices, enabled)
                     lines.append(line)
                     line_start_idx = i
                     line_start_point = new_point
+                    wipe_start_idx = None
+                    wipe_end_idx = None
                 current_point = new_point
+            elif line == WIPE_START:
+                wipe_start_idx = i - line_start_idx
+            elif line == WIPE_END:
+                wipe_end_idx = i - line_start_idx
             # elif line.startswith(TYPE_ID):
             #     current_type = line
-        line = Line(gcode_lines[line_start_idx:], self.config, line_start_point, current_point, extrusion_end_point, enabled)
+        wipe_indices = (wipe_start_idx, wipe_end_idx) if wipe_start_idx is not None else None
+        line = Line(gcode_lines[line_start_idx:], self.config, line_start_point, current_point, extrusion_end_point, wipe_indices, enabled)
         lines.append(line)
         return gcode_lines[:pre_end_idx], lines, current_point
 
 class Line:
-    def __init__(self, gcode_lines, config, start_point, end_point, extrusion_end_point, enabled):
+    def __init__(self, gcode_lines, config, start_point, end_point, extrusion_end_point, wipe_indices, enabled):
         self._has_seam = None
 
         self.config = config
@@ -265,6 +275,7 @@ class Line:
         self.end_point = end_point
         self.extrusion_end_point = extrusion_end_point
         # self.type = type
+        self.wipe_indices = wipe_indices
         self.enabled = enabled
         self.lines = self.process_gcode_lines(gcode_lines)
 
@@ -310,9 +321,9 @@ class Line:
                             lines += back_up_lines[1:]
                             lines.append(line)
                         else:
-                            wipe_point = current_point.wipe_point(new_point, self.config.back_up_distance)
+                            back_up_point = current_point.back_up_point(new_point, self.config.back_up_distance)
                             start_g1 = parse_line(gcode_lines[0])
-                            start_line = f"G1 X{gcode_fmt(wipe_point.x)} Y{gcode_fmt(wipe_point.y)}"
+                            start_line = f"G1 X{gcode_fmt(back_up_point.x)} Y{gcode_fmt(back_up_point.y)}"
                             if start_g1.z is not None:
                                 start_line += f" Z{gcode_fmt(start_g1.z)}"
                             if start_g1.f is not None:
@@ -336,45 +347,45 @@ class Line:
         return False
 
     def get_back_up_lines(self, gcode_lines, initial_e_rate):
+        # if gcode_lines[0] == "G1 X214.98 Y168.096":
+        #     import pdb; pdb.set_trace()
         lines = []
-        wiping = False
         current_point = self.start_point
-        prev_e = initial_e_rate * self.start_point.xy_dist(self.extrusion_end_point)
         extrusion_remaining = self.config.back_up_distance
+        if self.wipe_indices is not None:
+            gcode_lines = gcode_lines[:self.wipe_indices[0]]
         while extrusion_remaining > 0:
+            prev_e = initial_e_rate * self.start_point.xy_dist(self.extrusion_end_point)
             for i, line in enumerate(reversed(gcode_lines)):
                 i = len(gcode_lines) - i - 1
                 if extrusion_remaining <= 0:
                     break
-                if line == WIPE_END:
-                    wiping = True
-                elif line == WIPE_START:
-                    wiping = False
-                elif not wiping:
-                    g1 = parse_line(line)
-                    if g1 is not None:
-                        new_point = current_point.updated_with_g1_move(g1)
-                        if not current_point.is_xy_equal(new_point):
-                            distance = current_point.xy_dist(new_point)
-                            new_e = g1.e or initial_e_rate * distance
-                            if extrusion_remaining > distance:
-                                lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e, precision=5)} ; GapCloser (Seam)")
-                            else:
-                                waypoint = current_point.waypoint(new_point, extrusion_remaining)
-                                waypoint_proportion = extrusion_remaining / distance
-                                lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e * waypoint_proportion, precision=5)} ; GapCloser (Seam)")
+                g1 = parse_line(line)
+                if g1 is not None:
+                    new_point = current_point.updated_with_g1_move(g1)
+                    if not current_point.is_xy_equal(new_point):
+                        distance = current_point.xy_dist(new_point)
+                        new_e = g1.e
+                        if new_e is None and new_point != self.start_point:
+                            continue # At the end of extrudes there are speed changes, ignore them
+                        if extrusion_remaining > distance:
+                            lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e, precision=5)} ; GapCloser (Seam)")
+                        else:
+                            waypoint = current_point.waypoint(new_point, extrusion_remaining)
+                            waypoint_proportion = extrusion_remaining / distance
+                            lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e * waypoint_proportion, precision=5)} ; GapCloser (Seam)")
 
-                                start_g1 = parse_line(gcode_lines[0])
-                                start_line = f"G1 X{gcode_fmt(waypoint.x)} Y{gcode_fmt(waypoint.y)}"
-                                if start_g1.z is not None:
-                                    start_line += f" Z{gcode_fmt(start_g1.z)}"
-                                if start_g1.f is not None:
-                                    start_line += f" F{int(start_g1.f)}"
-                                start_line += " ; GapCloser (Seam)"
-                                lines.append(start_line)
-                            extrusion_remaining -= distance
-                            prev_e = new_e
-                            current_point = new_point
+                            start_g1 = parse_line(gcode_lines[0])
+                            start_line = f"G1 X{gcode_fmt(waypoint.x)} Y{gcode_fmt(waypoint.y)}"
+                            if start_g1.z is not None:
+                                start_line += f" Z{gcode_fmt(start_g1.z)}"
+                            if start_g1.f is not None:
+                                start_line += f" F{int(start_g1.f)}"
+                            start_line += " ; GapCloser (Seam)"
+                            lines.append(start_line)
+                        extrusion_remaining -= distance
+                        prev_e = new_e
+                        current_point = new_point
         lines = list(reversed(lines))
         return lines
 
