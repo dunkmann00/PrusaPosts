@@ -268,7 +268,7 @@ class Line:
         self.enabled = enabled
         self.lines = self.process_gcode_lines(gcode_lines)
 
-    @cached_property
+    @property
     def has_seam(self):
         if self._has_seam is not None:
             return self._has_seam
@@ -472,7 +472,7 @@ def get_config_lines(config):
 #     return gcode.gcode_lines()
 
 def main():
-    parser = argparse.ArgumentParser(name="GapCloser", description="Close up small gaps/holes that can be found at the start of extrusions after travel moves.")
+    parser = argparse.ArgumentParser(prog="GapCloser", description="Close up small gaps/holes that can be found at the start of extrusions after travel moves.")
     parser.add_argument("file_path", help="The path to the gcode file to process.")
     parser.add_argument("-d", "--back-up-distance", help="The distance to back up the extrusion by after a travel move.", type=float, default=1.0)
     parser.add_argument("--output-file-path", help="The path to save the processed output to. If not given, the original file is overwrtiten.")
