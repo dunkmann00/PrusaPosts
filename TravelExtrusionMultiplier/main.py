@@ -13,10 +13,11 @@ import argparse, re
 #                                          |
 #                                          |--> Lines
 
-TRAVEL_EXTRUSION_MULT_ENABLED = "; TRAVEL_EXTRUSION_MULT_ENABLED"
-TRAVEL_EXTRUSION_MULT_DISABLED = "; TRAVEL_EXTRUSION_MULT_DISABLED"
+HOLE_CLOSER_ENABLED = "; HOLE_CLOSER_ENABLED"
+HOLE_CLOSER_DISABLED = "; HOLE_CLOSER_DISABLED"
 COLOR_CHANGE_ID = "M600"
 LAYER_CHANGE_ID = ";LAYER_CHANGE"
+AFTER_LAYER_CHANGE_ID = ";AFTER_LAYER_CHANGE"
 RETRACT_BEFORE_TRAVEL_ID = "; retract_before_travel "
 FILAMENT_RETRACT_BEFORE_TRAVEL_ID = "; filament_retract_before_travel "
 RETRACT_LENGTH_ID = "; retract_length "
@@ -143,14 +144,14 @@ class GCode:
 
     def process_gcode_lines(self, gcode_lines):
         current_point = Point.undefined()
-        travel_extrusion_mult_enabled = True
+        hole_closer_enabled = True
 
         pre_end_idx = 0
         for i, line in enumerate(gcode_lines):
-            if line == TRAVEL_EXTRUSION_MULT_ENABLED:
-                travel_extrusion_mult_enabled = True
-            elif line == TRAVEL_EXTRUSION_MULT_DISABLED:
-                travel_extrusion_mult_enabled = False
+            if line == HOLE_CLOSER_ENABLED:
+                hole_closer_enabled = True
+            elif line == HOLE_CLOSER_DISABLED:
+                hole_closer_enabled = False
             elif line == LAYER_CHANGE_ID:
                 pre_end_idx = i
                 break
@@ -169,18 +170,18 @@ class GCode:
         layers = []
         layer_start_idx = None
         for i, line in enumerate(gcode_lines[pre_end_idx:post_start_idx], start=pre_end_idx):
-            if line == TRAVEL_EXTRUSION_MULT_ENABLED:
-                travel_extrusion_mult_enabled = True
-            elif line == TRAVEL_EXTRUSION_MULT_DISABLED:
-                travel_extrusion_mult_enabled = False
+            if line == HOLE_CLOSER_ENABLED:
+                hole_closer_enabled = True
+            elif line == HOLE_CLOSER_DISABLED:
+                hole_closer_enabled = False
             elif line == LAYER_CHANGE_ID:
                 if layer_start_idx is not None:
-                    layer = Layer(gcode_lines[layer_start_idx:i], self.config, current_point, travel_extrusion_mult_enabled)
+                    layer = Layer(gcode_lines[layer_start_idx:i], self.config, current_point, hole_closer_enabled)
                     current_point = layer.end_point
                     layers.append(layer)
                 layer_start_idx = i
         # Handle the last layer
-        layer = Layer(gcode_lines[layer_start_idx:post_start_idx], self.config, current_point, travel_extrusion_mult_enabled)
+        layer = Layer(gcode_lines[layer_start_idx:post_start_idx], self.config, current_point, hole_closer_enabled)
         current_point = layer.end_point
         layers.append(layer)
 
@@ -217,44 +218,62 @@ class Layer:
     def process_gcode_lines(self, gcode_lines, start_point, enabled):
         pre_end_idx = 0
         current_point = start_point
+        is_after_layer_change = False
         for i, line in enumerate(gcode_lines):
-            g1 = parse_line(line)
-            if g1 is not None:
-                new_point = current_point.updated_with_g1_move(g1)
-                if g1.e is None and not current_point.is_xy_equal(new_point): # Travel move found
-                    pre_end_idx = i
-                    break
-                current_point = new_point
+            if line == AFTER_LAYER_CHANGE_ID:
+                is_after_layer_change = True
+            else:
+                g1 = parse_line(line)
+                if g1 is not None:
+                    new_point = current_point.updated_with_g1_move(g1)
+                    if is_after_layer_change and g1.e is None and (g1.x or g1.y or g1.z) is not None:
+                        pre_end_idx = i
+                        start_point = new_point
+                        break
+                    current_point = new_point
 
         lines = []
         line_start_idx = pre_end_idx
         line_start_point = start_point
         # current_type = None
+        extrusion_end_point = start_point
         for i, line in enumerate(gcode_lines[pre_end_idx:], start=pre_end_idx):
             g1 = parse_line(line)
             if g1 is not None:
                 new_point = current_point.updated_with_g1_move(g1)
+                if g1.e is not None and g1.e > 0:
+                    extrusion_end_point = new_point # Tells us where extruding ends (needed when there is also a wipe)
                 if g1.e is None and not current_point.is_xy_equal(new_point): # Travel move found
-                    line = Line(gcode_lines[line_start_idx:i], self.config, line_start_point, current_point, enabled)
+                    line = Line(gcode_lines[line_start_idx:i], self.config, line_start_point, current_point, extrusion_end_point, enabled)
                     lines.append(line)
                     line_start_idx = i
                     line_start_point = new_point
                 current_point = new_point
             # elif line.startswith(TYPE_ID):
             #     current_type = line
-        line = Line(gcode_lines[line_start_idx:], self.config, line_start_point, current_point, enabled)
+        line = Line(gcode_lines[line_start_idx:], self.config, line_start_point, current_point, extrusion_end_point, enabled)
         lines.append(line)
         return gcode_lines[:pre_end_idx], lines, current_point
 
 class Line:
-    def __init__(self, gcode_lines, config, start_point, end_point, enabled):
+    def __init__(self, gcode_lines, config, start_point, end_point, extrusion_end_point, enabled):
+        self._has_seam = None
+
         self.config = config
 
         self.start_point = start_point
         self.end_point = end_point
+        self.extrusion_end_point = extrusion_end_point
         # self.type = type
         self.enabled = enabled
         self.lines = self.process_gcode_lines(gcode_lines)
+
+    @cached_property
+    def has_seam(self):
+        if self._has_seam is not None:
+            return self._has_seam
+        self._has_seam = self.start_point.xy_dist(self.extrusion_end_point) < 0.5
+        return self._has_seam
 
     def gcode_lines(self):
         return self.lines
@@ -275,47 +294,33 @@ class Line:
             return gcode_lines
 
         lines = []
-        # current_extrusion_remaining = self.config.travel_multiplier_distance
-        # add_start_margin = False
         current_point = self.start_point
-        first_extrusion = False
+        is_first_extrude = True
         for i, line in enumerate(gcode_lines):
-            # if current_extrusion_remaining > 0:
-            #     g1 = parse_line(line)
-            #     if g1 is not None:
-            #         new_point = current_point.updated_with_g1_move(g1)
-            #         if g1.e is not None and g1.e > 0 and not current_point.is_xy_equal(new_point):
-            #             extrusion_distance = current_point.xy_dist(new_point)
-            #             if current_extrusion_remaining >= extrusion_distance:
-            #                 lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(g1.e * self.config.travel_extrusion_multiplier, precision=5)} ; TEM Updated ({self.config.travel_extrusion_multiplier}x)")
-            #             else:
-            #                 waypoint = current_point.waypoint(new_point, current_extrusion_remaining)
-            #                 waypoint_proportion = current_extrusion_remaining / extrusion_distance
-            #                 lines.append(f"G1 X{gcode_fmt(waypoint.x)} Y{gcode_fmt(waypoint.y)} E{gcode_fmt(g1.e * waypoint_proportion * self.config.travel_extrusion_multiplier, precision=5)} ; TEM Updated ({self.config.travel_extrusion_multiplier}x)")
-            #                 lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(g1.e * (1.0 - waypoint_proportion), precision=5)} ; TEM Updated")
-            #             current_extrusion_remaining -= extrusion_distance
-            #             current_point = new_point
-            #             continue
-            #         else:
-            #             current_point = new_point
-            if not first_extrusion:
+            if is_first_extrude:
                 g1 = parse_line(line)
                 if g1 is not None:
                     new_point = current_point.updated_with_g1_move(g1)
                     if g1.e is not None and g1.e > 0 and not current_point.is_xy_equal(new_point):
-                        wipe_point = current_point.wipe_point(new_point, self.config.travel_multiplier_distance)
                         distance = current_point.xy_dist(new_point)
                         e_rate = g1.e / distance
-                        start_g1 = parse_line(gcode_lines[0])
-                        start_line = f"G1 X{gcode_fmt(wipe_point.x)} Y{gcode_fmt(wipe_point.y)}"
-                        if start_g1.z is not None:
-                            start_line += f" Z{gcode_fmt(start_g1.z)}"
-                        if start_g1.f is not None:
-                            start_line += f" F{int(start_g1.f)}"
-                        start_line += " ; TEM Updated"
-                        lines[0] = start_line
-                        lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(e_rate * (distance + self.config.travel_multiplier_distance), precision=5)} ; TEM Updated")
-                        first_extrusion = True
+                        if self.has_seam:
+                            back_up_lines = self.get_back_up_lines(gcode_lines, e_rate)
+                            lines[0] = back_up_lines[0]
+                            lines += back_up_lines[1:]
+                            lines.append(line)
+                        else:
+                            wipe_point = current_point.wipe_point(new_point, self.config.back_up_distance)
+                            start_g1 = parse_line(gcode_lines[0])
+                            start_line = f"G1 X{gcode_fmt(wipe_point.x)} Y{gcode_fmt(wipe_point.y)}"
+                            if start_g1.z is not None:
+                                start_line += f" Z{gcode_fmt(start_g1.z)}"
+                            if start_g1.f is not None:
+                                start_line += f" F{int(start_g1.f)}"
+                            start_line += " ; HC Updated"
+                            lines[0] = start_line
+                            lines.append(f"G1 X{gcode_fmt(new_point.x)} Y{gcode_fmt(new_point.y)} E{gcode_fmt(e_rate * (distance + self.config.back_up_distance), precision=5)} ; HC Updated")
+                        is_first_extrude = False
                         continue
                     current_point = new_point
             lines.append(line)
@@ -329,6 +334,50 @@ class Line:
                 if g1.e == self.config.retract_len and g1.f == self.config.deretract_speed:
                     return True
         return False
+
+    def get_back_up_lines(self, gcode_lines, initial_e_rate):
+        lines = []
+        wiping = False
+        current_point = self.start_point
+        prev_e = initial_e_rate * self.start_point.xy_dist(self.extrusion_end_point)
+        extrusion_remaining = self.config.back_up_distance
+        while extrusion_remaining > 0:
+            for i, line in enumerate(reversed(gcode_lines)):
+                i = len(gcode_lines) - i - 1
+                if extrusion_remaining <= 0:
+                    break
+                if line == WIPE_END:
+                    wiping = True
+                elif line == WIPE_START:
+                    wiping = False
+                elif not wiping:
+                    g1 = parse_line(line)
+                    if g1 is not None:
+                        new_point = current_point.updated_with_g1_move(g1)
+                        if not current_point.is_xy_equal(new_point):
+                            distance = current_point.xy_dist(new_point)
+                            new_e = g1.e or initial_e_rate * distance
+                            if extrusion_remaining > distance:
+                                lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e, precision=5)} ; HC Updated (Seam)")
+                            else:
+                                waypoint = current_point.waypoint(new_point, extrusion_remaining)
+                                waypoint_proportion = extrusion_remaining / distance
+                                lines.append(f"G1 X{gcode_fmt(current_point.x)} Y{gcode_fmt(current_point.y)} E{gcode_fmt(prev_e * waypoint_proportion, precision=5)} ; HC Updated (Seam)")
+
+                                start_g1 = parse_line(gcode_lines[0])
+                                start_line = f"G1 X{gcode_fmt(waypoint.x)} Y{gcode_fmt(waypoint.y)}"
+                                if start_g1.z is not None:
+                                    start_line += f" Z{gcode_fmt(start_g1.z)}"
+                                if start_g1.f is not None:
+                                    start_line += f" F{int(start_g1.f)}"
+                                start_line += " ; HC Updated (Seam)"
+                                lines.append(start_line)
+                            extrusion_remaining -= distance
+                            prev_e = new_e
+                            current_point = new_point
+        lines = list(reversed(lines))
+        return lines
+
 
     # def add_deretraction(self, position=None):
     #     if self.config.retract_len > 0:
@@ -400,7 +449,7 @@ def gcode_fmt(value, precision=3):
 
 def get_config_lines(config):
     config_gcode_lines = []
-    config_gcode_lines.append("; Post-Processed With TravelExtrusionMultiplier (aka TEM)")
+    config_gcode_lines.append("; Post-Processed With HoleCloser (aka HC)")
     for name, value in sorted(vars(config).items()):
         if isinstance(value, bool):
             value = int(value)
@@ -423,11 +472,9 @@ def get_config_lines(config):
 #     return gcode.gcode_lines()
 
 def main():
-    parser = argparse.ArgumentParser(description="Apply an extrusion multiplier for a small amount of the extrusion after a travel move occurs.")
+    parser = argparse.ArgumentParser(description="Close up small holes that can be found at the start of extrusions after travel moves.")
     parser.add_argument("file_path", help="The path to the gcode file to process.")
-    # parser.add_argument("--wipe-threshold", help="When the upcoming travel distance is greater than this, the wipe and hop is added. The default is the 'Minimum travel after retraction' slicer setting.", type=float)
-    parser.add_argument("-m", "--travel-extrusion-multiplier", help="The extrusion multiplier to apply to the initial extrusion after a travel move.", type=float, default=1.0)
-    parser.add_argument("-d", "--travel-multiplier-distance", help="The distance to apply the extrusion multiplier after a travel move.", type=float, default=1.0)
+    parser.add_argument("-d", "--back-up-distance", help="The distance to back up the extrusion by after a travel move.", type=float, default=1.0)
     parser.add_argument("--output-file-path", help="The path to save the processed output to. If not given, the original file is overwrtiten.")
     args = parser.parse_args()
     gcode_path = Path(args.file_path)
@@ -435,7 +482,7 @@ def main():
     gcode_lines = get_gcode_lines(gcode_path)
     # print(f"{get_retraction_count(gcode_lines)} retractions performed before.")
     # print("Removing short lines...")
-    print("Adding extrusion multiplier after travels...")
+    print("Fixing extrusions found after travels...")
     config_args = vars(args).copy()
     config_args.pop("file_path")
     config_args.pop("output_file_path", None)
