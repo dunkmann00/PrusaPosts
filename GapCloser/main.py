@@ -90,18 +90,7 @@ class Point(namedtuple("Point", ["x", "y", "z"])):
 
 class GCodeConfig:
     def __init__(self, gcode_lines, **kwargs):
-        # self.travel_speed = int(get_value_for_id(TRAVEL_SPEED_ID, gcode_lines)) * 60     # convert to speed/min
-        # self.travel_speed_z = int(get_value_for_id(TRAVEL_SPEED_Z_ID, gcode_lines)) * 60 # convert to speed/min
-        # self.nozzle_diameter = float(get_value_for_id(NOZZLE_DIAMETER_ID, gcode_lines).split(",")[0])
-
-        # self.wipe_threshold = float(get_value_for_id((FILAMENT_RETRACT_BEFORE_TRAVEL_ID, RETRACT_BEFORE_TRAVEL_ID), gcode_lines).split(",")[0])
-
         self.retract_len = float(get_value_for_id((FILAMENT_RETRACT_LENGTH_ID, RETRACT_LENGTH_ID), gcode_lines))
-        # self.retract_speed = int(get_value_for_id((FILAMENT_RETRACT_SPEED_ID, RETRACT_SPEED_ID), gcode_lines).split(",")[0]) * 60 # convert to speed/min
-        # self.retract_layer_change = int(get_value_for_id((FILAMENT_RETRACT_LAYER_CHANGE, RETRACT_LAYER_CHANGE), gcode_lines).split(",")[0]) == 1
-
-        # self.wipe = int(get_value_for_id((FILAMENT_WIPE_ID, WIPE_ID), gcode_lines).split(",")[0]) == 1
-        # self.z_hop = float(get_value_for_id((FILAMENT_Z_HOP_ID, Z_HOP_ID), gcode_lines).split(",")[0])
         self.deretract_speed = int(get_value_for_id((FILAMENT_DERETRACT_SPEED_ID, DERETRACT_SPEED_ID), gcode_lines)) * 60 # convert to speed/min
         self.arc_fitting = get_value_for_id(ARC_FITTING, gcode_lines) == "emit_center"
 
@@ -112,10 +101,6 @@ class GCode:
     def __init__(self, gcode_lines, config):
         self.config = config
 
-        # if self.config.wipe:
-        #     raise RuntimeError("ColorBlip does not currently support 'Wipe while retracting'.")
-        # if self.config.z_hop > 0:
-        #     raise RuntimeError("ColorBlip does not currently support 'Lift Height' (aka Z-Hop).")
         if self.config.arc_fitting:
             raise RuntimeError("Arc Fitting is not supported.")
 
@@ -197,10 +182,6 @@ class Layer:
         self.end_point = end_point
         self.enabled = enabled
 
-    # @property
-    # def has_layer_color_change(self):
-    #     return COLOR_CHANGE_ID in self._pre_print
-
     @property
     def pre_print_gcode_lines(self):
         return self._pre_print
@@ -235,7 +216,6 @@ class Layer:
         lines = []
         line_start_idx = pre_end_idx
         line_start_point = start_point
-        # current_type = None
         extrusion_end_point = start_point
         wipe_start_idx = None
         wipe_end_idx = None
@@ -258,8 +238,7 @@ class Layer:
                 wipe_start_idx = i - line_start_idx
             elif line == WIPE_END:
                 wipe_end_idx = i - line_start_idx
-            # elif line.startswith(TYPE_ID):
-            #     current_type = line
+
         wipe_indices = (wipe_start_idx, wipe_end_idx) if wipe_start_idx is not None else None
         line = Line(gcode_lines[line_start_idx:], self.config, line_start_point, current_point, extrusion_end_point, wipe_indices, enabled)
         lines.append(line)
@@ -274,7 +253,6 @@ class Line:
         self.start_point = start_point
         self.end_point = end_point
         self.extrusion_end_point = extrusion_end_point
-        # self.type = type
         self.wipe_indices = wipe_indices
         self.enabled = enabled
         self.lines = self.process_gcode_lines(gcode_lines)
@@ -288,17 +266,6 @@ class Line:
 
     def gcode_lines(self):
         return self.lines
-
-    # @property
-    # def line_length(self):
-    #     current_point = self.start_point
-    #     length = 0
-    #     for line in self.lines:
-    #         g1 = parse_line(line)
-    #         if g1 is not None:
-    #             new_point = current_point.updated_with_g1_move(g1)
-    #             length += current_point.xy_dist(new_point)
-    #     return length
 
     def process_gcode_lines(self, gcode_lines):
         if not self.enabled or not self.has_deretraction(gcode_lines):
@@ -347,8 +314,6 @@ class Line:
         return False
 
     def get_back_up_lines(self, gcode_lines, initial_e_rate):
-        # if gcode_lines[0] == "G1 X214.98 Y168.096":
-        #     import pdb; pdb.set_trace()
         lines = []
         current_point = self.start_point
         extrusion_remaining = self.config.back_up_distance
@@ -389,46 +354,6 @@ class Line:
         lines = list(reversed(lines))
         return lines
 
-
-    # def add_deretraction(self, position=None):
-    #     if self.config.retract_len > 0:
-    #         position = 1 if position is None else position
-    #         self.lines.insert(position, f"G1 E{gcode_fmt(self.config.retract_len)} F{self.config.retract_speed}")
-
-    # def add_retraction(self, position=None):
-    #     if self.config.retract_len > 0:
-    #         position = len(self.lines) if position is None else position
-    #         self.lines.insert(position, f"G1 E-{gcode_fmt(self.config.retract_len)} F{self.config.retract_speed}")
-    #         position += 1
-    #         self.lines.insert(position, f"G1 F{self.config.travel_speed}")
-
-    # def add_start_feedrate(self):
-    #     g1 = parse_line(self.lines[0])
-    #     if g1.f is None:
-    #         self.lines[0] += f" F{self.config.travel_speed}"
-
-    # @staticmethod
-    # def type_removed(gcode_lines):
-    #     return [line for line in gcode_lines if not line.startswith(TYPE_ID)]
-
-    # @staticmethod
-    # def retractions_removed(gcode_lines):
-    #     for i in range(-1, max(-5, len(gcode_lines) * -1), -1):
-    #         line = gcode_lines[i]
-    #         g1 = parse_line(line)
-    #         if g1 is not None and g1.x is None and g1.y is None and g1.z is None and g1.e is not None:
-    #             gcode_lines = gcode_lines[:i]
-    #             break
-    #
-    #     for i in range(0, min(5, len(gcode_lines))):
-    #         line = gcode_lines[i]
-    #         g1 = parse_line(line)
-    #         if g1 is not None and g1.x is None and g1.y is None and g1.z is None and g1.e is not None:
-    #             del gcode_lines[i]
-    #             break
-    #     return gcode_lines
-
-
 def parse_line(gcode_line):
     result = g1_line.match(gcode_line)
     if result:
@@ -468,20 +393,6 @@ def get_config_lines(config):
     config_gcode_lines.append("")
     return config_gcode_lines
 
-# def get_retraction_count(gcode_lines):
-#     retractions = 0
-#     for line in gcode_lines:
-#         g1 = parse_line(line)
-#         if g1 is not None:
-#             if g1.e is not None and g1.x is None and g1.y is None and g1.z is None:
-#                 if g1.e < 0:
-#                     retractions += 1
-#     return retractions
-
-# def process_gcode(gcode_lines, **kwargs):
-#     gcode = GCode(gcode_lines, **kwargs)
-#     return gcode.gcode_lines()
-
 def main():
     parser = argparse.ArgumentParser(prog="GapCloser", description="Close up small gaps/holes that can be found at the start of extrusions after travel moves with deretractions.")
     parser.add_argument("file_path", help="The path to the gcode file to process.")
@@ -491,8 +402,7 @@ def main():
     gcode_path = Path(args.file_path)
     print("Loading G-code...")
     gcode_lines = get_gcode_lines(gcode_path)
-    # print(f"{get_retraction_count(gcode_lines)} retractions performed before.")
-    # print("Removing short lines...")
+
     print("Fixing gaps...")
     config_args = vars(args).copy()
     config_args.pop("file_path")
@@ -502,8 +412,7 @@ def main():
     gcode = GCode(gcode_lines, gcode_config)
     gcode_lines = gcode.gcode_lines()
     print("Complete!")
-    # print(f"{lines_removed} short lines removed.")
-    # print(f"{get_retraction_count(gcode_lines)} retractions performed after.")
+
     gcode_lines += get_config_lines(gcode_config)
     output_file_path = Path(args.output_file_path) if args.output_file_path is not None else gcode_path
     store_gcode_lines(gcode_lines, output_file_path)
