@@ -375,7 +375,9 @@ def get_value_for_id(id, gcode_lines):
     for gcode_id in id:
         for line in reversed(gcode_lines): # Go reversed because these things are found at the end
             if line.startswith(gcode_id):
-                return line.split("=")[-1].strip()
+                value = line.split("=")[-1].strip()
+                if value != "nil":
+                    return value
             elif line.startswith(PRUSA_CONFIG_ID):
                 if line.split("=")[-1].strip() == "begin":
                     break
