@@ -50,8 +50,6 @@ PRUSA_CONFIG_ID = "; prusaslicer_config = "
 g1_line = re.compile("^G1 (?:(?:X([0-9]*\\.?[0-9]*) *)|(?:Y([0-9]*\\.?[0-9]*) *)|(?:Z([0-9]*\\.?[0-9]*) *)|(?:E(-?[0-9]*\\.?[0-9]*) *)|(?:F([0-9]+) *))+$")
 G1 = namedtuple("G1", ["x", "y", "z", "e", "f"])
 
-lines_removed = 0
-
 class Point(namedtuple("Point", ["x", "y", "z"])):
     __slots__ = ()
     @classmethod
