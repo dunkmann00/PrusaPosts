@@ -17,6 +17,7 @@ BLIP_REMOVER_ENABLED = "; BLIP_REMOVER_ENABLED"
 BLIP_REMOVER_DISABLED = "; BLIP_REMOVER_DISABLED"
 COLOR_CHANGE_ID = "M600"
 LAYER_CHANGE_ID = ";LAYER_CHANGE"
+AFTER_LAYER_CHANGE_ID = ";AFTER_LAYER_CHANGE"
 RETRACT_BEFORE_TRAVEL_ID = "; retract_before_travel "
 FILAMENT_RETRACT_BEFORE_TRAVEL_ID = "; filament_retract_before_travel "
 RETRACT_LENGTH_ID = "; retract_length "
@@ -39,10 +40,11 @@ STOP_PRINTING_OBJECT_ID = "; stop printing object"
 TYPE_ID = ";TYPE:"
 Z_HOP_ID = "; retract_lift "
 FILAMENT_Z_HOP_ID = "; filament_retract_lift "
+M107 = "M107"
 
 PRUSA_CONFIG_ID = "; prusaslicer_config = "
 
-g1_line = re.compile("^G1 (?:(?:X([0-9]*\.?[0-9]*) *)|(?:Y([0-9]*\.?[0-9]*) *)|(?:Z([0-9]*\.?[0-9]*) *)|(?:E(-?[0-9]*\.?[0-9]*) *)|(?:F([0-9]+) *))+$")
+g1_line = re.compile("^G1 (?:(?:X([0-9]*\\.?[0-9]*) *)|(?:Y([0-9]*\\.?[0-9]*) *)|(?:Z([0-9]*\\.?[0-9]*) *)|(?:E(-?[0-9]*\\.?[0-9]*) *)|(?:F([0-9]+) *))+$")
 G1 = namedtuple("G1", ["x", "y", "z", "e", "f"])
 
 lines_removed = 0
@@ -147,14 +149,19 @@ class GCode:
                     current_point = current_point.updated_with_g1_move(g1)
 
         post_start_idx = len(gcode_lines)
+        m107_cnt = 0
         for i, line in enumerate(reversed(gcode_lines)):
             i_rev = len(gcode_lines) - i - 1
-            if line.startswith(STOP_PRINTING_OBJECT_ID):
-                post_start_idx = i_rev + 1
-                break
+            if line.startswith(M107):
+                if m107_cnt == 1:
+                    post_start_idx = i_rev + 1
+                    break
+                else:
+                    m107_cnt += 1
 
         layers = []
         layer_start_idx = None
+        current_type = None
         for i, line in enumerate(gcode_lines[pre_end_idx:post_start_idx], start=pre_end_idx):
             if line == BLIP_REMOVER_ENABLED:
                 blip_remover_enabled = True
@@ -162,25 +169,29 @@ class GCode:
                 blip_remover_enabled = False
             elif line == LAYER_CHANGE_ID:
                 if layer_start_idx is not None:
-                    layer = Layer(gcode_lines[layer_start_idx:i], self.config, current_point, blip_remover_enabled)
+                    layer = Layer(gcode_lines[layer_start_idx:i], self.config, current_point, current_type, blip_remover_enabled)
                     current_point = layer.end_point
+                    current_type = layer.end_type
                     layers.append(layer)
                 layer_start_idx = i
         # Handle the last layer
-        layer = Layer(gcode_lines[layer_start_idx:post_start_idx], self.config, current_point, blip_remover_enabled)
+        layer = Layer(gcode_lines[layer_start_idx:post_start_idx], self.config, current_point, current_type, blip_remover_enabled)
         current_point = layer.end_point
+        current_type = layer.end_type
         layers.append(layer)
 
         return gcode_lines[:pre_end_idx], gcode_lines[post_start_idx:], layers
 
 class Layer:
-    def __init__(self, gcode_lines, config, start_point, enabled):
+    def __init__(self, gcode_lines, config, start_point, start_type, enabled):
         self.config = config
-        pre, lines, end_point = self.process_gcode_lines(gcode_lines, start_point, enabled)
+        pre, lines, end_point, end_type = self.process_gcode_lines(gcode_lines, start_point, start_type, enabled)
         self._pre_print = pre
         self.lines = lines
         self.start_point = start_point
         self.end_point = end_point
+        self.start_type = start_type
+        self.end_type = end_type
         self.enabled = enabled
 
     @property
@@ -222,21 +233,27 @@ class Layer:
     def gcode_lines(self):
         return self._pre_print + self.print
 
-    def process_gcode_lines(self, gcode_lines, start_point, enabled):
+    def process_gcode_lines(self, gcode_lines, start_point, start_type, enabled):
         pre_end_idx = 0
         current_point = start_point
+        is_after_layer_change = False
         for i, line in enumerate(gcode_lines):
-            g1 = parse_line(line)
-            if g1 is not None:
-                current_point = current_point.updated_with_g1_move(g1)
-            elif line.startswith(START_PRINTING_OBJECT_ID):
-                pre_end_idx = i + 1
-                break
+            if line == AFTER_LAYER_CHANGE_ID:
+                is_after_layer_change = True
+            else:
+                g1 = parse_line(line)
+                if g1 is not None:
+                    new_point = current_point.updated_with_g1_move(g1)
+                    if is_after_layer_change and g1.e is None and (g1.x or g1.y or g1.z) is not None:
+                        pre_end_idx = i
+                        start_point = new_point
+                        break
+                    current_point = new_point
 
         lines = []
         line_start_idx = pre_end_idx
         line_start_point = start_point
-        current_type = None
+        current_type = start_type
         for i, line in enumerate(gcode_lines[pre_end_idx:], start=pre_end_idx):
             g1 = parse_line(line)
             if g1 is not None:
@@ -251,7 +268,7 @@ class Layer:
                 current_type = line
         line = Line(gcode_lines[line_start_idx:], self.config, line_start_point, current_point, current_type, enabled)
         lines.append(line)
-        return gcode_lines[:pre_end_idx], lines, current_point
+        return gcode_lines[:pre_end_idx], lines, current_point, current_type
 
 class Line:
     def __init__(self, gcode_lines, config, start_point, end_point, type, enabled):
@@ -343,7 +360,9 @@ def get_value_for_id(id, gcode_lines):
     for gcode_id in id:
         for line in reversed(gcode_lines): # Go reversed because these things are found at the end
             if line.startswith(gcode_id):
-                return line.split("=")[-1].strip()
+                value = line.split("=")[-1].strip()
+                if value != "nil":
+                    return value
             elif line.startswith(PRUSA_CONFIG_ID):
                 if line.split("=")[-1].strip() == "begin":
                     break
@@ -354,7 +373,7 @@ def gcode_fmt(value, precision=3):
 def get_config_lines(args, gcode_lines):
     config_gcode_lines = []
     config_gcode_lines.append("; Post-Processed With BlipRemover")
-    config_gcode_lines.append(f"; wipe_threshold = {args.wipe_threshold or get_value_for_id(RETRACT_BEFORE_TRAVEL_ID, gcode_lines).split(',')[0]}")
+    config_gcode_lines.append(f"; wipe_threshold = {args.wipe_threshold or get_value_for_id((FILAMENT_RETRACT_BEFORE_TRAVEL_ID, RETRACT_BEFORE_TRAVEL_ID), gcode_lines).split(',')[0]}")
     config_gcode_lines.append("")
     return config_gcode_lines
 
