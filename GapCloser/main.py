@@ -152,6 +152,7 @@ class GCode:
 
         layers = []
         layer_start_idx = None
+        current_type = None
         for i, line in enumerate(gcode_lines[pre_end_idx:post_start_idx], start=pre_end_idx):
             if line == GAP_CLOSER_ENABLED:
                 gap_closer_enabled = True
@@ -159,25 +160,29 @@ class GCode:
                 gap_closer_enabled = False
             elif line == LAYER_CHANGE_ID:
                 if layer_start_idx is not None:
-                    layer = Layer(gcode_lines[layer_start_idx:i], self.config, current_point, gap_closer_enabled)
+                    layer = Layer(gcode_lines[layer_start_idx:i], self.config, current_point, current_type, gap_closer_enabled)
                     current_point = layer.end_point
+                    current_type = layer.end_type
                     layers.append(layer)
                 layer_start_idx = i
         # Handle the last layer
-        layer = Layer(gcode_lines[layer_start_idx:post_start_idx], self.config, current_point, gap_closer_enabled)
+        layer = Layer(gcode_lines[layer_start_idx:post_start_idx], self.config, current_point, current_type, gap_closer_enabled)
         current_point = layer.end_point
+        current_type = layer.end_type
         layers.append(layer)
 
         return gcode_lines[:pre_end_idx], gcode_lines[post_start_idx:], layers
 
 class Layer:
-    def __init__(self, gcode_lines, config, start_point, enabled):
+    def __init__(self, gcode_lines, config, start_point, start_type, enabled):
         self.config = config
-        pre, lines, end_point = self.process_gcode_lines(gcode_lines, start_point, enabled)
+        pre, lines, end_point, end_type = self.process_gcode_lines(gcode_lines, start_point, start_type, enabled)
         self._pre_print = pre
         self.lines = lines
         self.start_point = start_point
         self.end_point = end_point
+        self.start_type = start_type
+        self.end_type = end_type
         self.enabled = enabled
 
     @property
@@ -194,7 +199,7 @@ class Layer:
     def gcode_lines(self):
         return self._pre_print + self.print
 
-    def process_gcode_lines(self, gcode_lines, start_point, enabled):
+    def process_gcode_lines(self, gcode_lines, start_point, start_type, enabled):
         pre_end_idx = 0
         current_point = start_point
         is_after_layer_change = False
@@ -214,6 +219,7 @@ class Layer:
         lines = []
         line_start_idx = pre_end_idx
         line_start_point = start_point
+        current_type = start_type
         extrusion_end_point = start_point
         wipe_start_idx = None
         wipe_end_idx = None
@@ -225,7 +231,7 @@ class Layer:
                     extrusion_end_point = new_point # Tells us where extruding ends (needed when there is also a wipe)
                 if g1.e is None and not current_point.is_xy_equal(new_point): # Travel move found
                     wipe_indices = (wipe_start_idx, wipe_end_idx) if wipe_start_idx is not None else None
-                    line = Line(gcode_lines[line_start_idx:i], self.config, line_start_point, current_point, extrusion_end_point, wipe_indices, enabled)
+                    line = Line(gcode_lines[line_start_idx:i], self.config, line_start_point, current_point, extrusion_end_point, wipe_indices, enabled, current_type)
                     lines.append(line)
                     line_start_idx = i
                     line_start_point = new_point
@@ -236,14 +242,16 @@ class Layer:
                 wipe_start_idx = i - line_start_idx
             elif line == WIPE_END:
                 wipe_end_idx = i - line_start_idx
+            elif line.startswith(TYPE_ID):
+                current_type = line[len(TYPE_ID):]
 
         wipe_indices = (wipe_start_idx, wipe_end_idx) if wipe_start_idx is not None else None
-        line = Line(gcode_lines[line_start_idx:], self.config, line_start_point, current_point, extrusion_end_point, wipe_indices, enabled)
+        line = Line(gcode_lines[line_start_idx:], self.config, line_start_point, current_point, extrusion_end_point, wipe_indices, enabled, current_type)
         lines.append(line)
-        return gcode_lines[:pre_end_idx], lines, current_point
+        return gcode_lines[:pre_end_idx], lines, current_point, current_type
 
 class Line:
-    def __init__(self, gcode_lines, config, start_point, end_point, extrusion_end_point, wipe_indices, enabled):
+    def __init__(self, gcode_lines, config, start_point, end_point, extrusion_end_point, wipe_indices, enabled, type):
         self._has_seam = None
 
         self.config = config
@@ -253,6 +261,7 @@ class Line:
         self.extrusion_end_point = extrusion_end_point
         self.wipe_indices = wipe_indices
         self.enabled = enabled
+        self.type = type
         self.lines = self.process_gcode_lines(gcode_lines)
 
     @property
@@ -266,7 +275,7 @@ class Line:
         return self.lines
 
     def process_gcode_lines(self, gcode_lines):
-        if not self.enabled or not self.has_deretraction(gcode_lines):
+        if not self.enabled or not self.has_deretraction(gcode_lines) or (not self.is_perimeter and self.config.perimeters_only):
             return gcode_lines
 
         lines = []
@@ -310,6 +319,10 @@ class Line:
                 if g1.e == self.config.retract_len and g1.f == self.config.deretract_speed:
                     return True
         return False
+
+    @property
+    def is_perimeter(self):
+        return self.type.lower() in ["external perimeter", "perimeter"]
 
     def get_back_up_lines(self, gcode_lines, initial_e_rate):
         lines = []
@@ -397,6 +410,7 @@ def main():
     parser = argparse.ArgumentParser(prog="GapCloser", description="Close up small gaps/holes that can be found at the start of extrusions after travel moves with deretractions.")
     parser.add_argument("file_path", help="The path to the gcode file to process.")
     parser.add_argument("-d", "--back-up-distance", help="The distance to back up the extrusion by after a travel move with a deretraction.", type=float, default=1.0)
+    parser.add_argument("-p", "--perimeters-only", help="Only close holes in the perimeters.", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--output-file-path", help="The path to save the processed output to. If not given, the original file is overwrtiten.")
     args = parser.parse_args()
     gcode_path = Path(args.file_path)
